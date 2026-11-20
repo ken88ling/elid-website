@@ -1,16 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { RequireRole } from "@/components/app-shell";
+import { withRole } from "@/components/app-shell";
 import {
   Badge,
   Button,
-  Card,
-  EmptyState,
-  ErrorBanner,
+  Checkbox,
+  DataTable,
   Field,
+  FormModal,
   Input,
-  Modal,
   PageHeader,
   table,
 } from "@/components/ui";
@@ -70,54 +69,39 @@ function BranchesView() {
         actions={<Button onClick={() => openEditor("new")}>Add branch</Button>}
       />
 
-      <Card>
-        {branches.length === 0 ? (
-          <EmptyState title="No branches yet" description="Add your first store location." />
-        ) : (
-          <div className={table.wrap}>
-            <table className={table.table}>
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className={table.th}>Code</th>
-                  <th className={table.th}>Name</th>
-                  <th className={table.th}>Address</th>
-                  <th className={table.th}>Created</th>
-                  <th className={table.th}>Status</th>
-                  <th className={table.th}>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className={table.tbody}>
-                {branches.map((b) => (
-                  <tr key={b.id}>
-                    <td className={`${table.td} font-mono font-medium text-zinc-900`}>{b.code}</td>
-                    <td className={`${table.td} font-medium text-zinc-900`}>{b.name}</td>
-                    <td className={table.td}>{b.address || "—"}</td>
-                    <td className={table.td}>{formatDateTime(b.createdAt)}</td>
-                    <td className={table.td}>
-                      {b.active ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}
-                    </td>
-                    <td className={`${table.td} text-right`}>
-                      <Button variant="ghost" size="sm" onClick={() => openEditor(b)}>
-                        Edit
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      <DataTable
+        isEmpty={branches.length === 0}
+        emptyTitle="No branches yet"
+        emptyDescription="Add your first store location."
+        columns={["Code", "Name", "Address", "Created", "Status"]}
+        actions
+      >
+        {branches.map((b) => (
+          <tr key={b.id}>
+            <td className={`${table.td} font-mono font-medium text-zinc-900`}>{b.code}</td>
+            <td className={`${table.td} font-medium text-zinc-900`}>{b.name}</td>
+            <td className={table.td}>{b.address || "—"}</td>
+            <td className={table.td}>{formatDateTime(b.createdAt)}</td>
+            <td className={table.td}>
+              {b.active ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}
+            </td>
+            <td className={`${table.td} text-right`}>
+              <Button variant="ghost" size="sm" onClick={() => openEditor(b)}>
+                Edit
+              </Button>
+            </td>
+          </tr>
+        ))}
+      </DataTable>
 
-      <Modal
+      <FormModal
         open={editing !== null}
         title={editing === "new" ? "Add branch" : "Edit branch"}
         onClose={() => setEditing(null)}
+        onSubmit={save}
+        error={formError}
+        saving={saving}
       >
-        <form onSubmit={save} className="space-y-4">
-          <ErrorBanner message={formError} />
           <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
             <Field label="Code" hint={editing === "new" ? "2–8 letters/numbers" : "Can't be changed"}>
               <Input
@@ -136,34 +120,15 @@ function BranchesView() {
             <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </Field>
           {editing !== "new" && (
-            <label className="flex items-center gap-2 text-sm text-zinc-700">
-              <input
-                type="checkbox"
-                checked={form.active}
-                onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                className="size-4 rounded border-zinc-300"
-              />
-              Active (staff can sign in and sell here)
-            </label>
+            <Checkbox
+              label="Active (staff can sign in and sell here)"
+              checked={form.active}
+              onChange={(active) => setForm({ ...form, active })}
+            />
           )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      </FormModal>
     </div>
   );
 }
 
-export default function BranchesPage() {
-  return (
-    <RequireRole roles={["admin"]}>
-      <BranchesView />
-    </RequireRole>
-  );
-}
+export default withRole(["admin"], BranchesView);

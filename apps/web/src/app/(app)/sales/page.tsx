@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Card, EmptyState, ErrorBanner, Field, Input, PageHeader, Select, Spinner, table } from "@/components/ui";
+import { Badge, Card, DataTable, Field, Input, PageHeader, Select, table } from "@/components/ui";
 import { api, errorMessage } from "@/lib/data";
 import { endOfDayIso, formatDateTime, formatMoney, startOfDayIso, toDateInput } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -115,31 +115,23 @@ export default function SalesPage() {
         <Stat label="Refunds" value={formatMoney(summary.refunded)} sub={`${summary.refundedCount} refunded`} />
       </div>
 
-      <Card>
-        {result?.error ? (
-          <div className="p-4">
-            <ErrorBanner message={result.error} />
-          </div>
-        ) : loading ? (
-          <Spinner />
-        ) : sales.length === 0 ? (
-          <EmptyState title="No sales" description="Try a different date range or filter." />
-        ) : (
-          <div className={table.wrap}>
-            <table className={table.table}>
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className={table.th}>Receipt</th>
-                  <th className={table.th}>Date</th>
-                  {isAdmin && <th className={table.th}>Branch</th>}
-                  <th className={table.th}>Cashier</th>
-                  <th className={table.th}>Items</th>
-                  <th className={table.th}>Payment</th>
-                  <th className={`${table.th} text-right`}>Total</th>
-                  <th className={table.th}>Status</th>
-                </tr>
-              </thead>
-              <tbody className={table.tbody}>
+      <DataTable
+        error={result?.error}
+        loading={loading}
+        isEmpty={sales.length === 0}
+        emptyTitle="No sales"
+        emptyDescription="Try a different date range or filter."
+        columns={[
+          "Receipt",
+          "Date",
+          ...(isAdmin ? ["Branch"] : []),
+          "Cashier",
+          "Items",
+          "Payment",
+          { label: "Total", align: "right" },
+          "Status",
+        ]}
+      >
                 {sales.map((sale) => (
                   <tr
                     key={sale.id}
@@ -168,11 +160,7 @@ export default function SalesPage() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      </DataTable>
     </div>
   );
 }

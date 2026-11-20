@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Retail business management system (POS + sales, staff roles, multiple branches). pnpm + Turborepo monorepo:
 
-- `apps/web` — Next.js 16 (App Router, React 19, Tailwind v4, plain Tailwind — no component library). **This is where active work happens.**
-- `apps/api` — Hono on Node + Drizzle ORM + Postgres. Still contains the original todo demo (`/api/todos`); it is replaced in Phase 2.
+- `apps/web` — Next.js 16 (App Router, React 19, Tailwind v4, plain Tailwind — no component library).
+- `apps/api` — Hono on Node + Drizzle ORM + Postgres: auth, branches, products/stock, sales/refunds, users.
+- `packages/shared` — domain types (`@app/shared/types`) and the deterministic demo dataset (`@app/shared/seed`) used by both the web mock and the API seed. Consumed as TypeScript source (web: `transpilePackages`; api: imports are type-only except the seed script).
 
-`todo.md` is the roadmap and source of truth for scope and progress. Phase 1 (web on mock data) is done; Phase 2 is the Hono backend; Phase 3 swaps the web data layer to the API. Tick items in `todo.md` as work completes.
+`todo.md` is the roadmap and source of truth for scope and progress. Phase 1 (web on a localStorage mock) and Phase 2 (Hono API) are done; Phase 3 swaps the web data layer from the mock to the API. Tick items in `todo.md` as work completes.
 
 ## Commands
 
@@ -17,25 +18,27 @@ Run from the repo root unless noted.
 
 ```bash
 pnpm install
-pnpm --filter @app/web dev     # web only on :3000 (all that's needed in Phase 1)
+pnpm --filter @app/web dev     # web only on :3000 (the web still runs on the mock)
 pnpm dev                       # web :3000 + api :4000 via turbo (api needs Postgres)
-pnpm build | pnpm lint | pnpm typecheck   # turbo across both apps
+pnpm build | pnpm lint | pnpm typecheck   # turbo across all workspaces
 pnpm fallow                    # dead code / duplication / complexity report
 
 # Database (apps/api) — Docker Postgres is mapped to host port 5433, not 5432,
-# because a local Postgres already listens on 5432.
+# so it does not clash with a Postgres already installed on the machine.
 pnpm db:up | pnpm db:down
 pnpm db:generate               # drizzle-kit generate from apps/api/src/db/schema.ts
 pnpm db:migrate
+pnpm db:seed                   # demo data into an empty DB; `pnpm db:seed --reset` wipes and reseeds
 pnpm db:studio
 ```
 
-There is no test suite yet. Verification so far is lint + typecheck + build plus manual testing in the browser.
+There is no automated test suite yet. Verification so far is lint + typecheck + build, browser testing of the web app, and curl against the API (demo logins: `admin@demo.store / admin123`, `manager.dt@demo.store / manager123`, `cashier.dt@demo.store / cashier123`).
 
 Gotchas:
 - `apps/web` `typecheck` runs `next typegen` before `tsc`; without it the global `LayoutProps`/`PageProps` types are missing.
 - Don't run `next build` while `next dev` is running — they share `.next/` and the dev server starts returning 404s. Stop dev, build, restart.
-- Env files: `apps/api/.env` (`PORT`, `DATABASE_URL`, `CORS_ORIGIN`), `apps/web/.env.local` (`NEXT_PUBLIC_CURRENCY`, default USD). `.env.example` files document them.
+- Env files: `apps/api/.env` (`PORT`, `DATABASE_URL`, `CORS_ORIGIN`, `NODE_ENV`), `apps/web/.env.local` (`NEXT_PUBLIC_CURRENCY`, default USD; `API_URL` for the `/api` rewrite). `.env.example` files document them.
+- Schema changes: edit `apps/api/src/db/schema.ts`, then `pnpm db:generate` and `pnpm db:migrate`. If a change both drops and creates tables, drizzle-kit prompts interactively about renames — split it into two generates.
 
 ## Next.js 16 specifics
 
@@ -47,19 +50,26 @@ Gotchas:
 
 ## Web architecture
 
-**Data layer contract (`src/lib/data/index.ts`).** All pages get data only through the exported `api` object (`auth`, `branches`, `products`, `sales`, `users`, `demo`). In Phase 1 it is a mock backed by `localStorage` (`rbms.db`, session in `rbms.session`, admin's chosen branch in `rbms.branch`), seeded deterministically from `seed.ts`. Every function is async and enforces the business rules the Hono API must enforce identically later: role checks, non-admins limited to their own branch, sale creation validates everything before decrementing stock (all-or-nothing), cash requires tendered ≥ total, discount ≤ subtotal, refunds only by manager/admin, only once, and restock items. Errors are `DataError(message, status)` with HTTP-like status codes. When the stored shape changes, bump `DB_VERSION` in `seed.ts` so old browser data is discarded. Phase 3 should replace the implementations, not the call sites.
+**Data layer contract (`src/lib/data/index.ts`).** All pages get data only through the exported `api` object (`auth`, `branches`, `products`, `sales`, `users`, `demo`). In Phase 1 it is a mock backed by `localStorage` (`rbms.db`, session in `rbms.session`, admin's chosen branch in `rbms.branch`), seeded deterministically from `@app/shared/seed`. Every function is async and enforces the same business rules as the Hono API: role checks, non-admins limited to their own branch, sale creation validates everything before decrementing stock (all-or-nothing), cash requires tendered ≥ total, discount ≤ subtotal, refunds only by manager/admin, only once, and restock items. Errors are `DataError(message, status)` with HTTP-like status codes. When the stored shape changes, bump `DB_VERSION` in `packages/shared/src/seed.ts` so old browser data is discarded. Phase 3 should replace the implementations, not the call sites.
 
-**Domain model (`src/lib/types.ts`).** Money is always integer cents (`*Cents`); format with `formatMoney`/`parseMoney` from `lib/format.ts`. Stock is per branch (`branchId:productId` keys); product price/catalog is global. `SaleView` is a sale joined with branch, cashier and refunder names plus `receiptNo` (`{branchCode}-{number padded to 6}`).
+**Domain model (`packages/shared/src/types.ts`, re-exported by `src/lib/types.ts`).** Money is always integer cents (`*Cents`); format with `formatMoney`/`parseMoney` from `lib/format.ts`. Stock is per branch (`branchId:productId` keys); product price/catalog is global. `SaleView` is a sale joined with branch, cashier and refunder names plus `receiptNo` (`{branchCode}-{number padded to 6}`).
 
-**Roles.** `admin` (no `branchId`, all branches, switches branch in the header), `manager` and `cashier` (fixed `branchId`). Nav visibility is the `NAV` table in `components/app-shell.tsx`; page-level guards use `<RequireRole>`; the data layer re-checks everything.
+**Roles.** `admin` (no `branchId`, all branches, switches branch in the header), `manager` and `cashier` (fixed `branchId`). Nav visibility is the `NAV` table in `components/app-shell.tsx`; pages are wrapped with `withRole(roles, View)` (built on `RequireRole`); the data layer re-checks everything.
 
 **Session & branch context.** `useSession()` gives `user`, accessible `branches`, current `branch`, `setBranchId`, `reloadBranches`, `logout`, `hasRole`. `AppShell` keys `<main>` by branch id, so switching branch remounts the page (carts and filters reset by design).
 
-**UI.** Shared primitives in `components/ui.tsx` (Button, Input, Select, Field, Card, Badge, Modal, PageHeader, `table` class helpers, `cx`). Printing shows only `.print-area` (the `Receipt` component) and hides `.no-print` — see `globals.css`.
+**UI.** Shared primitives in `components/ui.tsx` (Button, Input, Select, Field, Card, Badge, Modal, `FormModal`, `DataTable`, PageHeader, `table` cell classes, `cx`); POS pieces in `components/pos/`. Printing shows only `.print-area` (the `Receipt` component) and hides `.no-print` — see `globals.css`.
 
 ## API architecture (apps/api)
 
-`src/app.ts` builds the Hono app with chained routes and exports `type AppType` for an end-to-end typed `hc<AppType>` client; the package's `exports` points at `src/app.ts` so the web app can import the type from `@app/api`. `src/index.ts` is the Node server entry; `src/env.ts` validates env with zod; `src/db/` holds the Drizzle client and schema; migrations go to `apps/api/drizzle/`. The planned Phase 2 design (schema, scrypt sessions in httpOnly cookies, Next.js rewrite of `/api/*` to Hono for same-origin cookies) is in `todo.md`.
+The API mirrors the web data layer function-for-function (same inputs, same `@app/shared/types` response shapes, same error messages and status codes), so Phase 3 is a swap of implementations in `apps/web/src/lib/data/index.ts`. **Business rules exist in both places until Phase 3 removes the mock — change them together.**
+
+- `src/app.ts` mounts routers under `/api/{auth,branches,products,sales,users}` and exports `type AppType` for a typed `hc<AppType>` client (`@app/api` package `exports` points at `src/app.ts`). `onError` turns everything into `{ error: string }`.
+- Errors: throw via `fail(status, message)` (`src/lib/http.ts`, returns `never` so TS narrows after it). Validate with `validate(target, zodSchema)`, not raw `zValidator`, to get readable 400 messages.
+- Auth (`src/lib/auth.ts`): scrypt password hashes (`scrypt$salt$key`), random session token in an httpOnly `rbms_session` cookie, only its sha256 stored in `sessions`. `requireAuth` middleware puts the user row in `c.get("user")`; handlers call `requireRole(user, ...)` / `assertBranchAccess(user, branchId)`. Deactivating a user or changing their password deletes their sessions.
+- Sales (`src/routes/sales.ts`): creation runs in one transaction; stock is decremented with `UPDATE … WHERE quantity >= n` so concurrent sales can't oversell (DB `CHECK` constraints also forbid negative stock/prices). Refunds lock the sale row (`FOR UPDATE`) and restock. Receipt number = `{branch code}-{sales.number padded to 6}`; `number` is an identity column the seed restarts after inserting demo sales.
+- Ids are `text` (UUIDs for new rows) so the shared seed's readable ids (`b-dt`, `u-admin`, `p-001`) work in Postgres too.
+- The browser reaches the API same-origin through the Next.js rewrite `/api/:path*` → `API_URL` (`apps/web/next.config.ts`).
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

@@ -1,4 +1,4 @@
-import type { Branch, PaymentMethod, Product, Sale, SaleItem, User } from "../types";
+import type { Branch, PaymentMethod, Product, Sale, SaleItem, User } from "./types";
 
 export type StoredUser = User & { password: string };
 
@@ -61,7 +61,6 @@ export const DEMO_ACCOUNTS = [
 
 export function createSeedDb(now = new Date()): Db {
   const random = createRandom(42);
-  const pick = <T,>(items: T[]): T => items[Math.floor(random() * items.length)]!;
   const created = new Date(now.getTime() - 30 * 86_400_000).toISOString();
 
   const branches: Branch[] = [
@@ -90,18 +89,105 @@ export function createSeedDb(now = new Date()): Db {
     createdAt: created,
   }));
 
+  const stock = seedStock(random, branches, products);
+  const sales = seedSales(random, { now, branches, users, products });
+
+  return {
+    version: DB_VERSION,
+    branches,
+    users,
+    products,
+    stock,
+    sales,
+    nextSaleNumber: sales.length + 1,
+  };
+}
+
+// The helpers below must keep the order of random() calls unchanged, or the demo data changes.
+
+type Random = () => number;
+
+const pickFrom = <T,>(random: Random, items: T[]): T =>
+  items[Math.floor(random() * items.length)]!;
+
+/** Mostly well stocked, ~10% low stock, ~5% out of stock. */
+function seedStock(random: Random, branches: Branch[], products: Product[]) {
   const stock: Record<string, number> = {};
   for (const branch of branches) {
     for (const product of products) {
       const roll = random();
-      stock[stockKey(branch.id, product.id)] =
-        roll < 0.05 ? 0 : roll < 0.15 ? 1 + Math.floor(random() * 4) : 10 + Math.floor(random() * 50);
+      let quantity = 0;
+      if (roll >= 0.15) quantity = 10 + Math.floor(random() * 50);
+      else if (roll >= 0.05) quantity = 1 + Math.floor(random() * 4);
+      stock[stockKey(branch.id, product.id)] = quantity;
     }
   }
+  return stock;
+}
 
-  // Past week of sales so the Sales page has something to show.
+function seedSaleItems(random: Random, products: Product[]): SaleItem[] {
+  const lineCount = 1 + Math.floor(random() * 4);
+  const items: SaleItem[] = [];
+  for (let l = 0; l < lineCount; l++) {
+    const product = pickFrom(random, products);
+    if (items.some((i) => i.productId === product.id)) continue;
+    const quantity = 1 + Math.floor(random() * 3);
+    items.push({
+      productId: product.id,
+      sku: product.sku,
+      name: product.name,
+      unitPriceCents: product.priceCents,
+      quantity,
+      lineTotalCents: product.priceCents * quantity,
+    });
+  }
+  return items;
+}
+
+function seedPaymentMethod(roll: number): PaymentMethod {
+  if (roll < 0.55) return "cash";
+  return roll < 0.95 ? "card" : "other";
+}
+
+function seedSale(
+  random: Random,
+  ctx: { number: number; branch: Branch; cashiers: StoredUser[]; manager?: StoredUser; at: Date; products: Product[] },
+): Sale {
+  const items = seedSaleItems(random, ctx.products);
+  const subtotalCents = items.reduce((sum, i) => sum + i.lineTotalCents, 0);
+  const discountCents = random() < 0.1 ? Math.min(100, subtotalCents) : 0;
+  const totalCents = subtotalCents - discountCents;
+  const paymentMethod = seedPaymentMethod(random());
+  const tenderedCents = paymentMethod === "cash" ? Math.ceil(totalCents / 500) * 500 : totalCents;
+  const refundedBy = ctx.manager !== undefined && random() < 0.05 ? ctx.manager : null;
+
+  return {
+    id: `s-${ctx.number}`,
+    number: ctx.number,
+    branchId: ctx.branch.id,
+    cashierId: pickFrom(random, ctx.cashiers).id,
+    status: refundedBy ? "refunded" : "completed",
+    paymentMethod,
+    items,
+    subtotalCents,
+    discountCents,
+    totalCents,
+    tenderedCents,
+    changeCents: tenderedCents - totalCents,
+    createdAt: ctx.at.toISOString(),
+    refundedAt: refundedBy ? new Date(ctx.at.getTime() + 3_600_000).toISOString() : null,
+    refundedById: refundedBy?.id ?? null,
+    refundReason: refundedBy ? "Customer returned items" : null,
+  };
+}
+
+/** Past week of sales so the Sales page has something to show. */
+function seedSales(
+  random: Random,
+  data: { now: Date; branches: Branch[]; users: StoredUser[]; products: Product[] },
+): Sale[] {
+  const { now, branches, users, products } = data;
   const sales: Sale[] = [];
-  let number = 1;
   for (let daysAgo = 7; daysAgo >= 0; daysAgo--) {
     for (const branch of branches) {
       const cashiers = users.filter((u) => u.branchId === branch.id);
@@ -112,54 +198,11 @@ export function createSeedDb(now = new Date()): Db {
         at.setDate(at.getDate() - daysAgo);
         at.setHours(9 + Math.floor(random() * 11), Math.floor(random() * 60), 0, 0);
         if (at > now) continue;
-
-        const lineCount = 1 + Math.floor(random() * 4);
-        const items: SaleItem[] = [];
-        for (let l = 0; l < lineCount; l++) {
-          const product = pick(products);
-          if (items.some((i) => i.productId === product.id)) continue;
-          const quantity = 1 + Math.floor(random() * 3);
-          items.push({
-            productId: product.id,
-            sku: product.sku,
-            name: product.name,
-            unitPriceCents: product.priceCents,
-            quantity,
-            lineTotalCents: product.priceCents * quantity,
-          });
-        }
-        const subtotalCents = items.reduce((sum, i) => sum + i.lineTotalCents, 0);
-        const discountCents = random() < 0.1 ? Math.min(100, subtotalCents) : 0;
-        const totalCents = subtotalCents - discountCents;
-        const roll = random();
-        const paymentMethod: PaymentMethod = roll < 0.55 ? "cash" : roll < 0.95 ? "card" : "other";
-        const tenderedCents =
-          paymentMethod === "cash" ? Math.ceil(totalCents / 500) * 500 : totalCents;
-        const refunded = manager !== undefined && random() < 0.05;
-
-        sales.push({
-          id: `s-${number}`,
-          number,
-          branchId: branch.id,
-          cashierId: pick(cashiers).id,
-          status: refunded ? "refunded" : "completed",
-          paymentMethod,
-          items,
-          subtotalCents,
-          discountCents,
-          totalCents,
-          tenderedCents,
-          changeCents: tenderedCents - totalCents,
-          createdAt: at.toISOString(),
-          refundedAt: refunded ? new Date(at.getTime() + 3_600_000).toISOString() : null,
-          refundedById: refunded ? manager.id : null,
-          refundReason: refunded ? "Customer returned items" : null,
-        });
-        number++;
+        sales.push(
+          seedSale(random, { number: sales.length + 1, branch, cashiers, manager, at, products }),
+        );
       }
     }
   }
-  sales.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-
-  return { version: DB_VERSION, branches, users, products, stock, sales, nextSaleNumber: number };
+  return sales.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }

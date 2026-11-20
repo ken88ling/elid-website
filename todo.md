@@ -82,25 +82,27 @@ Legend: `[ ]` todo · `[x]` done · `[~]` in progress
 ### Quality
 - [x] Lint + typecheck + build pass
 - [~] Responsive check — desktop verified; tablet/phone still to check
-- [~] Manual test pass per role — admin + cashier done in browser (sale, scan, cash change, receipt, refund + restock, role/branch guards); manager still to test
+- [x] Manual test pass per role — admin, manager and cashier tested in browser (sale, scan, discount, cash change, receipt, refund + restock, set stock, role/branch guards)
 
 ---
 
 ## Phase 2 — Backend (Hono + Drizzle + Postgres)
 
-- [ ] Schema: branches, users, sessions, products, branch_stock, sales, sale_items (money as integer cents)
-- [ ] Migrations + seed script (`pnpm db:seed`)
-- [ ] Auth: password hashing (scrypt), session cookie (httpOnly), `/api/auth/login|logout|me`
-- [ ] Middleware: `requireAuth`, `requireRole`, branch access check
-- [ ] Routes: `/api/branches`, `/api/products`, `/api/products/:id/stock`, `/api/sales`, `/api/sales/:id/refund`, `/api/users`
-- [ ] Sale creation in a DB transaction with atomic stock decrement
-- [ ] Consistent JSON errors (validation → 400, auth → 401/403, conflicts → 409)
-- [ ] Remove todo demo routes/table
-- [ ] Next.js rewrite `/api/*` → Hono (same-origin cookies, no CORS issues)
+- [x] Schema: branches, users, sessions, products, branch_stock, sales, sale_items (money as integer cents)
+- [x] Migrations + seed script (`pnpm db:seed`, `--reset` to wipe) using the same demo data as the web mock (`packages/shared`)
+- [x] Auth: password hashing (scrypt), session cookie (httpOnly), `/api/auth/login|logout|me`
+- [x] Middleware: `requireAuth`, `requireRole`, branch access check
+- [x] Routes: `/api/branches`, `/api/products`, `/api/products/:id/stock`, `/api/sales`, `/api/sales/:id/refund`, `/api/users`
+- [x] Sale creation in a DB transaction with atomic stock decrement
+- [x] Consistent JSON errors (validation → 400, auth → 401/403, conflicts → 409)
+- [x] Remove todo demo routes/table
+- [x] Next.js rewrite `/api/*` → Hono (same-origin cookies, no CORS issues)
+- [x] End-to-end API checks with curl: auth, role/branch guards, sale validation, atomic stock under 5 concurrent sales of the last unit, refunds + restock, user rules
+- [ ] Automated API test suite (none yet)
 
 ## Phase 3 — Connect web to API
 
-- [ ] Replace mock data layer with typed Hono RPC client (`hc<AppType>`)
+- [ ] Add `"@app/api": "workspace:*"` and `hono` to apps/web and replace mock data layer with typed Hono RPC client (`hc<AppType>`)
 - [ ] Error handling + 401 → login redirect
 - [ ] Remove mock store / reset demo action
 - [ ] End-to-end test of each role against real DB

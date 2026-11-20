@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { api } from "@/lib/data";
 import { useSession } from "@/lib/session";
 import { ROLE_LABELS, type Role } from "@/lib/types";
@@ -129,7 +129,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 /** Shows children only for the given roles. */
-export function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
+function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { hasRole } = useSession();
   if (!hasRole(...roles)) {
     return (
@@ -142,6 +142,17 @@ export function RequireRole({ roles, children }: { roles: Role[]; children: Reac
     );
   }
   return <>{children}</>;
+}
+
+/** Wraps a page component so only the given roles can see it: `export default withRole([...], View)`. */
+export function withRole(roles: Role[], View: ComponentType) {
+  return function RoleGuardedPage() {
+    return (
+      <RequireRole roles={roles}>
+        <View />
+      </RequireRole>
+    );
+  };
 }
 
 /** Shown when an admin has no active branch selected. */

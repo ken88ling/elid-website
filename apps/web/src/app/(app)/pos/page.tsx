@@ -2,29 +2,33 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NoBranch } from "@/components/app-shell";
+import { CartPanel, type CartLine, type Payment } from "@/components/pos/cart-panel";
+import { CategoryTabs, ProductGrid } from "@/components/pos/product-grid";
 import { Receipt } from "@/components/receipt";
-import { Badge, Button, Card, cx, ErrorBanner, Input, Modal, Spinner } from "@/components/ui";
+import { Button, ErrorBanner, Input, Modal, Spinner } from "@/components/ui";
 import { api, errorMessage } from "@/lib/data";
-import { formatMoney, parseMoney } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import {
-  PAYMENT_LABELS,
-  type PaymentMethod,
-  type ProductWithStock,
-  type SaleView,
-} from "@/lib/types";
-
-type CartLine = { product: ProductWithStock; quantity: number };
+import type { ProductWithStock, SaleView } from "@/lib/types";
 
 const ALL = "All";
 
-/** Exact amount plus the next few round notes above the total. */
-function quickCashOptions(totalCents: number): number[] {
-  const options = new Set<number>([totalCents]);
-  for (const step of [500, 1000, 2000, 5000, 10000]) {
-    options.add(Math.ceil(totalCents / step) * step || step);
-  }
-  return [...options].filter((v) => v >= totalCents && v > 0).sort((a, b) => a - b).slice(0, 4);
+function matchesQuery(product: ProductWithStock, q: string) {
+  return (
+    !q ||
+    product.name.toLowerCase().includes(q) ||
+    product.sku.toLowerCase().includes(q) ||
+    !!product.barcode?.includes(q)
+  );
+}
+
+/** Keep cart lines in sync with freshly loaded stock and prices. */
+function syncCart(lines: CartLine[], products: ProductWithStock[]): CartLine[] {
+  return lines.flatMap((line) => {
+    const fresh = products.find((p) => p.id === line.product.id);
+    const quantity = fresh ? Math.min(line.quantity, fresh.stock) : 0;
+    return fresh && quantity > 0 ? [{ product: fresh, quantity }] : [];
+  });
 }
 
 export default function PosPage() {
@@ -39,9 +43,6 @@ export default function PosPage() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState(ALL);
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [discountInput, setDiscountInput] = useState("");
-  const [method, setMethod] = useState<PaymentMethod>("cash");
-  const [tenderedInput, setTenderedInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<SaleView | null>(null);
@@ -53,13 +54,7 @@ export default function PosPage() {
       (rows) => {
         if (!active) return;
         setProducts(rows);
-        // Keep cart lines in sync with the latest stock and prices.
-        setCart((lines) =>
-          lines.flatMap((line) => {
-            const fresh = rows.find((p) => p.id === line.product.id);
-            return fresh ? [{ product: fresh, quantity: Math.min(line.quantity, fresh.stock) }] : [];
-          }).filter((line) => line.quantity > 0),
-        );
+        setCart((lines) => syncCart(lines, rows));
       },
       (err: unknown) => active && setLoadError(errorMessage(err)),
     );
@@ -76,12 +71,7 @@ export default function PosPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (products ?? []).filter(
-      (p) =>
-        (category === ALL || p.category === category) &&
-        (!q ||
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          p.barcode?.includes(q)),
+      (p) => (category === ALL || p.category === category) && matchesQuery(p, q),
     );
   }, [products, query, category]);
 
@@ -110,21 +100,18 @@ export default function PosPage() {
     setCart((lines) =>
       lines.flatMap((l) => {
         if (l.product.id !== productId) return [l];
-        if (quantity <= 0) return [];
-        return [{ ...l, quantity: Math.min(quantity, l.product.stock) }];
+        return quantity <= 0 ? [] : [{ ...l, quantity: Math.min(quantity, l.product.stock) }];
       }),
     );
   }
 
+  /** Barcode scanners type the code and press Enter. */
   function onSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter") return;
     event.preventDefault();
     const code = query.trim().toLowerCase();
     if (!code) return;
-    // Barcode scanners type the code and press Enter.
-    const exact = (products ?? []).find(
-      (p) => p.sku.toLowerCase() === code || p.barcode === code,
-    );
+    const exact = (products ?? []).find((p) => p.sku.toLowerCase() === code || p.barcode === code);
     const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
     if (target) {
       addToCart(target);
@@ -134,50 +121,27 @@ export default function PosPage() {
     }
   }
 
-  const subtotal = cart.reduce((sum, l) => sum + l.product.priceCents * l.quantity, 0);
-  const discount = parseMoney(discountInput) ?? 0;
-  const total = Math.max(0, subtotal - discount);
-  const tendered = method === "cash" ? parseMoney(tenderedInput) : total;
-  const change = tendered !== null ? tendered - total : null;
-  const itemCount = cart.reduce((sum, l) => sum + l.quantity, 0);
-
-  const problem =
-    cart.length === 0
-      ? "Add items to start a sale"
-      : discount > subtotal
-        ? "Discount is more than the subtotal"
-        : method === "cash" && (tendered === null || tendered < total)
-          ? "Enter the cash received"
-          : null;
-
-  function clearSale() {
-    setCart([]);
-    setDiscountInput("");
-    setTenderedInput("");
-    setMethod("cash");
-    setError(null);
-  }
-
-  async function charge() {
-    if (!branchId || problem) return;
+  async function charge(payment: Payment): Promise<boolean> {
+    if (!branchId) return false;
     setSubmitting(true);
     setError(null);
     try {
       const sale = await api.sales.create({
         branchId,
         items: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
-        paymentMethod: method,
-        discountCents: discount,
-        tenderedCents: method === "cash" ? (tendered ?? undefined) : undefined,
+        paymentMethod: payment.method,
+        discountCents: payment.discountCents,
+        tenderedCents: payment.tenderedCents,
       });
       setReceipt(sale);
-      clearSale();
-      setReloadKey((k) => k + 1);
+      setCart([]);
+      return true;
     } catch (err) {
       setError(errorMessage(err));
-      setReloadKey((k) => k + 1); // stock may have changed
+      return false;
     } finally {
       setSubmitting(false);
+      setReloadKey((k) => k + 1); // refresh stock either way
     }
   }
 
@@ -192,7 +156,6 @@ export default function PosPage() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-      {/* Products */}
       <section className="min-w-0 space-y-4">
         <Input
           ref={searchRef}
@@ -203,212 +166,22 @@ export default function PosPage() {
           onKeyDown={onSearchKeyDown}
           className="h-12 text-base"
         />
-
-        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-          {categories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategory(c)}
-              className={cx(
-                "rounded-full px-3 py-1.5 text-sm font-medium whitespace-nowrap",
-                c === category
-                  ? "bg-zinc-900 text-white"
-                  : "bg-white text-zinc-600 ring-1 ring-zinc-200 hover:bg-zinc-100",
-              )}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-
-        {filtered.length === 0 ? (
-          <Card className="p-8 text-center text-sm text-zinc-500">No products found.</Card>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((p) => {
-              const left = p.stock - inCart(p.id);
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={left <= 0}
-                  onClick={() => addToCart(p)}
-                  className="flex min-h-28 flex-col rounded-xl border border-zinc-200 bg-white p-3 text-left shadow-sm transition hover:border-indigo-400 hover:shadow disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-zinc-200"
-                >
-                  <span className="line-clamp-2 text-sm font-medium text-zinc-900">{p.name}</span>
-                  <span className="mt-0.5 text-xs text-zinc-500">{p.sku}</span>
-                  <span className="mt-auto flex items-end justify-between gap-2 pt-2">
-                    <span className="font-semibold text-zinc-900">{formatMoney(p.priceCents)}</span>
-                    {p.stock === 0 ? (
-                      <Badge tone="red">Out</Badge>
-                    ) : (
-                      <Badge tone={left <= 5 ? "amber" : "neutral"}>{left} left</Badge>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <CategoryTabs categories={categories} value={category} onChange={setCategory} />
+        <ProductGrid products={filtered} inCart={inCart} onAdd={addToCart} />
       </section>
 
-      {/* Cart & payment */}
       <aside className="lg:sticky lg:top-20 lg:self-start">
-        <Card className="flex flex-col">
-          <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-            <h2 className="font-semibold text-zinc-900">
-              Current sale{itemCount > 0 && <span className="text-zinc-500"> · {itemCount} items</span>}
-            </h2>
-            {cart.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={clearSale}>
-                Clear
-              </Button>
-            )}
-          </div>
-
-          <div className="max-h-[40vh] overflow-y-auto">
-            {cart.length === 0 ? (
-              <p className="px-4 py-10 text-center text-sm text-zinc-500">
-                Tap a product or scan a barcode.
-              </p>
-            ) : (
-              <ul className="divide-y divide-zinc-100">
-                {cart.map((line) => (
-                  <li key={line.product.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-zinc-900">{line.product.name}</p>
-                      <p className="text-xs text-zinc-500">{formatMoney(line.product.priceCents)} each</p>
-                    </div>
-                    <div className="flex items-center rounded-lg border border-zinc-300">
-                      <button
-                        type="button"
-                        aria-label={`Decrease ${line.product.name}`}
-                        onClick={() => setQuantity(line.product.id, line.quantity - 1)}
-                        className="size-8 text-zinc-600 hover:bg-zinc-100"
-                      >
-                        −
-                      </button>
-                      <input
-                        aria-label={`Quantity of ${line.product.name}`}
-                        inputMode="numeric"
-                        value={line.quantity}
-                        onChange={(e) => {
-                          const n = Number.parseInt(e.target.value, 10);
-                          if (!Number.isNaN(n)) setQuantity(line.product.id, n);
-                        }}
-                        className="w-9 border-x border-zinc-300 text-center text-sm focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        aria-label={`Increase ${line.product.name}`}
-                        disabled={line.quantity >= line.product.stock}
-                        onClick={() => setQuantity(line.product.id, line.quantity + 1)}
-                        className="size-8 text-zinc-600 hover:bg-zinc-100 disabled:text-zinc-300"
-                      >
-                        +
-                      </button>
-                    </div>
-                    <p className="w-20 text-right text-sm font-medium text-zinc-900">
-                      {formatMoney(line.product.priceCents * line.quantity)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-3 border-t border-zinc-200 px-4 py-4">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-600">Subtotal</span>
-              <span className="text-zinc-900">{formatMoney(subtotal)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-4 text-sm">
-              <label htmlFor="discount" className="text-zinc-600">
-                Discount
-              </label>
-              <Input
-                id="discount"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={discountInput}
-                onChange={(e) => setDiscountInput(e.target.value)}
-                className="h-9 w-28 text-right"
-              />
-            </div>
-            <div className="flex items-center justify-between text-lg font-semibold text-zinc-900">
-              <span>Total</span>
-              <span>{formatMoney(total)}</span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              {(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMethod(m)}
-                  className={cx(
-                    "h-10 rounded-lg text-sm font-medium ring-1",
-                    m === method
-                      ? "bg-indigo-600 text-white ring-indigo-600"
-                      : "bg-white text-zinc-700 ring-zinc-300 hover:bg-zinc-50",
-                  )}
-                >
-                  {PAYMENT_LABELS[m]}
-                </button>
-              ))}
-            </div>
-
-            {method === "cash" && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-4 text-sm">
-                  <label htmlFor="tendered" className="text-zinc-600">
-                    Cash received
-                  </label>
-                  <Input
-                    id="tendered"
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    value={tenderedInput}
-                    onChange={(e) => setTenderedInput(e.target.value)}
-                    className="h-9 w-28 text-right"
-                  />
-                </div>
-                {total > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {quickCashOptions(total).map((amount) => (
-                      <Button
-                        key={amount}
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setTenderedInput((amount / 100).toFixed(2))}
-                      >
-                        {amount === total ? "Exact" : formatMoney(amount)}
-                      </Button>
-                    ))}
-                  </div>
-                )}
-                {change !== null && change >= 0 && cart.length > 0 && (
-                  <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                    <span>Change</span>
-                    <span>{formatMoney(change)}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <ErrorBanner message={error} />
-
-            <Button
-              size="lg"
-              className="w-full"
-              disabled={!!problem || submitting}
-              onClick={() => void charge()}
-            >
-              {submitting ? "Processing…" : problem && cart.length > 0 ? problem : `Charge ${formatMoney(total)}`}
-            </Button>
-          </div>
-        </Card>
+        <CartPanel
+          cart={cart}
+          error={error}
+          submitting={submitting}
+          onQuantity={setQuantity}
+          onClear={() => {
+            setCart([]);
+            setError(null);
+          }}
+          onCharge={charge}
+        />
       </aside>
 
       <Modal

@@ -16,14 +16,14 @@ import type {
   SaleView,
   User,
 } from "../types";
-import { createSeedDb, DB_VERSION, stockKey, type Db, type StoredUser } from "./seed";
+import { createSeedDb, DB_VERSION, stockKey, type Db, type StoredUser } from "@app/shared/seed";
 
-export { DEMO_ACCOUNTS } from "./seed";
+export { DEMO_ACCOUNTS } from "@app/shared/seed";
 
 const DB_KEY = "rbms.db";
 const SESSION_KEY = "rbms.session";
 
-export class DataError extends Error {
+class DataError extends Error {
   constructor(
     message: string,
     readonly status: number,

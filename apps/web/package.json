@@ -10,8 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@app/api": "workspace:*",
-    "hono": "^4.13.19",
+    "@app/shared": "workspace:*",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"

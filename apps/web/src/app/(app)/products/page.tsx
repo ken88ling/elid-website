@@ -1,18 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { NoBranch, RequireRole } from "@/components/app-shell";
+import { NoBranch, withRole } from "@/components/app-shell";
 import {
   Badge,
   Button,
-  Card,
-  EmptyState,
-  ErrorBanner,
+  Checkbox,
+  DataTable,
   Field,
+  FormModal,
   Input,
-  Modal,
   PageHeader,
-  Spinner,
   table,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/data";
@@ -157,33 +155,22 @@ function ProductsView() {
         className="mb-4 max-w-md"
       />
 
-      <Card>
-        {loadError ? (
-          <div className="p-4">
-            <ErrorBanner message={loadError} />
-          </div>
-        ) : !products ? (
-          <Spinner />
-        ) : filtered.length === 0 ? (
-          <EmptyState title="No products found" />
-        ) : (
-          <div className={table.wrap}>
-            <table className={table.table}>
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className={table.th}>Product</th>
-                  <th className={table.th}>SKU</th>
-                  <th className={table.th}>Barcode</th>
-                  <th className={table.th}>Category</th>
-                  <th className={`${table.th} text-right`}>Price</th>
-                  <th className={`${table.th} text-right`}>Stock</th>
-                  <th className={table.th}>Status</th>
-                  <th className={table.th}>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className={table.tbody}>
+      <DataTable
+        error={loadError}
+        loading={!products}
+        isEmpty={filtered.length === 0}
+        emptyTitle="No products found"
+        columns={[
+          "Product",
+          "SKU",
+          "Barcode",
+          "Category",
+          { label: "Price", align: "right" },
+          { label: "Stock", align: "right" },
+          "Status",
+        ]}
+        actions
+      >
                 {filtered.map((p) => (
                   <tr key={p.id}>
                     <td className={`${table.td} font-medium text-zinc-900`}>{p.name}</td>
@@ -225,19 +212,16 @@ function ProductsView() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      </DataTable>
 
-      <Modal
+      <FormModal
         open={editing !== null}
         title={editing === "new" ? "Add product" : "Edit product"}
         onClose={() => setEditing(null)}
+        onSubmit={saveProduct}
+        error={formError}
+        saving={saving}
       >
-        <form onSubmit={saveProduct} className="space-y-4">
-          <ErrorBanner message={formError} />
           <Field label="Name">
             <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
@@ -272,35 +256,23 @@ function ProductsView() {
             </Field>
           </div>
           {editing !== "new" && (
-            <label className="flex items-center gap-2 text-sm text-zinc-700">
-              <input
-                type="checkbox"
-                checked={form.active}
-                onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                className="size-4 rounded border-zinc-300"
-              />
-              Active (available in POS)
-            </label>
+            <Checkbox
+              label="Active (available in POS)"
+              checked={form.active}
+              onChange={(active) => setForm({ ...form, active })}
+            />
           )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      </FormModal>
 
-      <Modal
+      <FormModal
         open={stockFor !== null}
         title={`Set stock: ${stockFor?.name ?? ""}`}
         size="sm"
         onClose={() => setStockFor(null)}
+        onSubmit={saveStock}
+        error={stockError}
+        saving={saving}
       >
-        <form onSubmit={saveStock} className="space-y-4">
-          <ErrorBanner message={stockError} />
           <Field label={`Quantity at ${branch.name}`}>
             <Input
               type="number"
@@ -312,24 +284,9 @@ function ProductsView() {
               onChange={(e) => setStockInput(e.target.value)}
             />
           </Field>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setStockFor(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      </FormModal>
     </div>
   );
 }
 
-export default function ProductsPage() {
-  return (
-    <RequireRole roles={["admin", "manager"]}>
-      <ProductsView />
-    </RequireRole>
-  );
-}
+export default withRole(["admin", "manager"], ProductsView);

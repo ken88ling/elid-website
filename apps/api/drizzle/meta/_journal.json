@@ -8,6 +8,20 @@
       "when": 1795097607508,
       "tag": "0000_black_edwin_jarvis",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795099918709,
+      "tag": "0001_retail_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795099923973,
+      "tag": "0002_drop_todos",
+      "breakpoints": true
     }
   ]
 }

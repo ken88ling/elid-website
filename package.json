@@ -1,9 +1,9 @@
 {
-  "name": "api-monorepo",
+  "name": "elid-website",
   "private": true,
   "packageManager": "pnpm@10.24.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.9"
   },
   "scripts": {
     "dev": "turbo run dev",
@@ -15,11 +15,13 @@
     "db:generate": "pnpm --filter @app/api db:generate",
     "db:migrate": "pnpm --filter @app/api db:migrate",
     "db:studio": "pnpm --filter @app/api db:studio",
-    "fallow": "fallow"
+    "fallow": "fallow",
+    "db:seed": "pnpm --filter @app/api db:seed"
   },
   "devDependencies": {
     "fallow": "^3.44.0",
     "turbo": "^2.11.13",
     "typescript": "^5"
-  }
+  },
+  "license": "MIT"
 }

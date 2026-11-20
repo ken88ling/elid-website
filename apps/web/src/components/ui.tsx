@@ -154,7 +154,7 @@ export function Spinner({ label = "Loading…" }: { label?: string }) {
   );
 }
 
-export function EmptyState({ title, description }: { title: string; description?: string }) {
+function EmptyState({ title, description }: { title: string; description?: string }) {
   return (
     <div className="px-6 py-12 text-center">
       <p className="font-medium text-zinc-900">{title}</p>
@@ -227,9 +227,135 @@ export function Modal({
 
 /** Shared table styling helpers */
 export const table = {
-  wrap: "overflow-x-auto",
-  table: "min-w-full divide-y divide-zinc-200 text-sm",
   th: "whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500",
   td: "whitespace-nowrap px-4 py-3 text-zinc-700",
-  tbody: "divide-y divide-zinc-100",
 };
+
+/** A header label, or `{ label, align: "right" }` for numeric columns. */
+export type Column = string | { label: string; align: "right" };
+
+/**
+ * Card containing a table, with the shared error / loading / empty states.
+ * `columns` are header labels; `actions` adds a trailing (visually hidden) actions column.
+ * Body rows go in `children`.
+ */
+export function DataTable({
+  columns,
+  actions = false,
+  children,
+  error,
+  loading = false,
+  isEmpty,
+  emptyTitle,
+  emptyDescription,
+}: {
+  columns: Column[];
+  actions?: boolean;
+  children: ReactNode;
+  error?: string | null;
+  loading?: boolean;
+  isEmpty: boolean;
+  emptyTitle: string;
+  emptyDescription?: string;
+}) {
+  const header = (
+    <>
+      {columns.map((column) => {
+        const { label, align } = typeof column === "string" ? { label: column, align: null } : column;
+        return (
+          <th key={label} className={cx(table.th, align === "right" && "text-right")}>
+            {label}
+          </th>
+        );
+      })}
+      {actions && (
+        <th className={table.th}>
+          <span className="sr-only">Actions</span>
+        </th>
+      )}
+    </>
+  );
+
+  return (
+    <Card>
+      {error ? (
+        <div className="p-4">
+          <ErrorBanner message={error} />
+        </div>
+      ) : loading ? (
+        <Spinner />
+      ) : isEmpty ? (
+        <EmptyState title={emptyTitle} description={emptyDescription} />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-zinc-200 text-sm">
+            <thead className="bg-zinc-50">
+              <tr>{header}</tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">{children}</tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+export function Checkbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-zinc-700">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-4 rounded border-zinc-300"
+      />
+      {label}
+    </label>
+  );
+}
+
+/** Modal containing a form with an error banner and Cancel / Save buttons. */
+export function FormModal({
+  open,
+  title,
+  onClose,
+  onSubmit,
+  error,
+  saving,
+  size,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  error: string | null;
+  saving: boolean;
+  size?: "sm" | "md" | "lg";
+  children: ReactNode;
+}) {
+  return (
+    <Modal open={open} title={title} size={size} onClose={onClose}>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <ErrorBanner message={error} />
+        {children}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

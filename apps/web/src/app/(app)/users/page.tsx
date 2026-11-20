@@ -1,19 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RequireRole } from "@/components/app-shell";
+import { withRole } from "@/components/app-shell";
 import {
   Badge,
   Button,
-  Card,
-  EmptyState,
-  ErrorBanner,
+  Checkbox,
+  DataTable,
   Field,
+  FormModal,
   Input,
-  Modal,
   PageHeader,
   Select,
-  Spinner,
   table,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/data";
@@ -108,66 +106,47 @@ function UsersView() {
         actions={<Button onClick={() => openEditor("new")}>Add user</Button>}
       />
 
-      <Card>
-        {loadError ? (
-          <div className="p-4">
-            <ErrorBanner message={loadError} />
-          </div>
-        ) : !users ? (
-          <Spinner />
-        ) : users.length === 0 ? (
-          <EmptyState title="No users" />
-        ) : (
-          <div className={table.wrap}>
-            <table className={table.table}>
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className={table.th}>Name</th>
-                  <th className={table.th}>Email</th>
-                  <th className={table.th}>Role</th>
-                  <th className={table.th}>Branch</th>
-                  <th className={table.th}>Status</th>
-                  <th className={table.th}>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className={table.tbody}>
-                {users.map((u) => (
-                  <tr key={u.id}>
-                    <td className={`${table.td} font-medium text-zinc-900`}>
-                      {u.name}
-                      {u.id === me.id && <span className="ml-2 text-xs text-zinc-500">(you)</span>}
-                    </td>
-                    <td className={table.td}>{u.email}</td>
-                    <td className={table.td}>
-                      <Badge tone={u.role === "admin" ? "indigo" : "neutral"}>{ROLE_LABELS[u.role]}</Badge>
-                    </td>
-                    <td className={table.td}>{branchName(u.branchId)}</td>
-                    <td className={table.td}>
-                      {u.active ? <Badge tone="green">Active</Badge> : <Badge>Deactivated</Badge>}
-                    </td>
-                    <td className={`${table.td} text-right`}>
-                      <Button variant="ghost" size="sm" onClick={() => openEditor(u)}>
-                        Edit
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      <DataTable
+        error={loadError}
+        loading={!users}
+        isEmpty={users?.length === 0}
+        emptyTitle="No users"
+        columns={["Name", "Email", "Role", "Branch", "Status"]}
+        actions
+      >
+        {users?.map((u) => (
+          <tr key={u.id}>
+            <td className={`${table.td} font-medium text-zinc-900`}>
+              {u.name}
+              {u.id === me.id && <span className="ml-2 text-xs text-zinc-500">(you)</span>}
+            </td>
+            <td className={table.td}>{u.email}</td>
+            <td className={table.td}>
+              <Badge tone={u.role === "admin" ? "indigo" : "neutral"}>{ROLE_LABELS[u.role]}</Badge>
+            </td>
+            <td className={table.td}>{branchName(u.branchId)}</td>
+            <td className={table.td}>
+              {u.active ? <Badge tone="green">Active</Badge> : <Badge>Deactivated</Badge>}
+            </td>
+            <td className={`${table.td} text-right`}>
+              <Button variant="ghost" size="sm" onClick={() => openEditor(u)}>
+                Edit
+              </Button>
+            </td>
+          </tr>
+        ))}
+      </DataTable>
 
-      <Modal
+      <FormModal
         open={editing !== null && form !== null}
         title={editing === "new" ? "Add user" : "Edit user"}
         onClose={() => setEditing(null)}
+        onSubmit={save}
+        error={formError}
+        saving={saving}
       >
         {form && (
-          <form onSubmit={save} className="space-y-4">
-            <ErrorBanner message={formError} />
+          <>
             <Field label="Name">
               <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
@@ -223,35 +202,17 @@ function UsersView() {
               </Field>
             </div>
             {editing !== "new" && !isSelf && (
-              <label className="flex items-center gap-2 text-sm text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={form.active}
-                  onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                  className="size-4 rounded border-zinc-300"
-                />
-                Active (can sign in)
-              </label>
+              <Checkbox
+                label="Active (can sign in)"
+                checked={form.active}
+                onChange={(active) => setForm({ ...form, active })}
+              />
             )}
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="secondary" onClick={() => setEditing(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </form>
+          </>
         )}
-      </Modal>
+      </FormModal>
     </div>
   );
 }
 
-export default function UsersPage() {
-  return (
-    <RequireRole roles={["admin"]}>
-      <UsersView />
-    </RequireRole>
-  );
-}
+export default withRole(["admin"], UsersView);
