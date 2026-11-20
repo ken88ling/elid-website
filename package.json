@@ -1,0 +1,25 @@
+{
+  "name": "api-monorepo",
+  "private": true,
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @app/api db:generate",
+    "db:migrate": "pnpm --filter @app/api db:migrate",
+    "db:studio": "pnpm --filter @app/api db:studio",
+    "fallow": "fallow"
+  },
+  "devDependencies": {
+    "fallow": "^3.44.0",
+    "turbo": "^2.11.13",
+    "typescript": "^5"
+  }
+}
